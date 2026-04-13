@@ -95,13 +95,60 @@ export default function ScanPage() {
     setScannedTools(scannedTools.filter(t => t.工具no !== no))
   }
 
-  const handleSubmit = () => {
-    alert(`${scannedTools.length}件の${mode}データを登録しました！（※登録処理は次回実装！）`)
-    setMode(null)
-    setStaff(null)
-    setScannedTools([])
-    setMessage(null)
-  }
+ // --- データベース用の現在日時を作成するツール (YYYY/MM/DD HH:mm:ss) ---
+  const getFormattedDate = () => {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+
+  // --- 3. 登録ボタンを押した時の処理 ---
+  const handleSubmit = async () => {
+    if (!mode || !staff || scannedTools.length === 0) return;
+
+    const now = getFormattedDate();
+
+    try {
+      if (mode === '持出') {
+        // 【持出の場合】新しく実績の行を作成する (INSERT)
+        const insertData = scannedTools.map(tool => ({
+          工具no: tool.工具no,
+          倉庫no: '1', // ※今回は仮で「1」をセット
+          持出者: staff.社員名,
+          持出日時: now,
+          返却者: '',
+          返却日時: ''
+        }));
+
+        const { error } = await supabase.from('持出返却実績').insert(insertData);
+        if (error) throw error;
+
+      } else if (mode === '返却') {
+        // 【返却の場合】既存の行を更新する (UPDATE)
+        // ※工具1件ずつ、まだ返却されていない行を狙って上書きします
+        for (const tool of scannedTools) {
+          const { error } = await supabase
+            .from('持出返却実績')
+            .update({ 返却者: staff.社員名, 返却日時: now })
+            .eq('工具no', tool.工具no)
+            .eq('返却日時', ''); // 返却日時が空っぽのレコードが対象
+          
+          if (error) throw error;
+        }
+      }
+
+      // 成功したら画面をリセットして完了メッセージ
+      alert(`${scannedTools.length}件の${mode}処理が完了しました！`);
+      setMode(null);
+      setStaff(null);
+      setScannedTools([]);
+      setMessage(null);
+
+    } catch (err) {
+      console.error("登録エラー:", err);
+      setMessage({ type: 'error', text: `データベースの登録中にエラーが発生しました。` });
+    }
+  };
 
   const handleReset = () => {
     if (scannedTools.length > 0 && !confirm('スキャン中のデータが消えますがよろしいですか？')) return;

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { staffSchema, warehouseSchema } from '../lib/volidotion'
-import { Wrench, Users, Home, Settings, Search, Menu, ChevronRight, ChevronDown, Database, Plus, Pencil, Copy, Trash2, Upload, Download, X } from 'lucide-react'
+import { Wrench, Users, Home, Settings, Search, Menu, ChevronRight, ChevronDown, Database, Plus, Pencil, Copy, Trash2, Upload, Download, X, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 
 // データの形を定義
@@ -87,6 +87,21 @@ export default function Page() {
   
   const [tools, setTools] = useState<Tool[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const fetchTools = async () => {
+    setIsLoading(true)
+    const { data, error } = await supabase.from('view_工具一覧').select('*')
+    if (error) {
+      console.error('データ取得エラー:', error)
+    } else {
+      const sorted = ((data as Tool[]) || []).sort((a, b) =>
+        a.工具no.localeCompare(b.工具no, 'ja', { numeric: true })
+      )
+      setTools(sorted)
+    }
+    setIsLoading(false)
+  }
+  const [toolListSearch, setToolListSearch] = useState('')
+  const [toolListStatus, setToolListStatus] = useState('すべての状態')
   // 工具マスタ
   const [toolMasters, setToolMasters] = useState<ToolMaster[]>([])
   const [isMasterLoading, setIsMasterLoading] = useState(false)
@@ -151,20 +166,10 @@ export default function Page() {
   const resizingCol = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null)
 
   useEffect(() => {
-    async function fetchTools() {
-      setIsLoading(true)
-      const { data, error } = await supabase.from('view_工具一覧').select('*')
-      if (error) {
-        console.error('データ取得エラー:', error)
-      } else {
-        const sorted = ((data as Tool[]) || []).sort((a, b) =>
-          a.工具no.localeCompare(b.工具no, 'ja', { numeric: true })
-        )
-        setTools(sorted)
-      }
-      setIsLoading(false)
+    async function load() {
+      await fetchTools()
     }
-    fetchTools()
+    load()
   }, [])
 
   useEffect(() => {
@@ -523,11 +528,14 @@ export default function Page() {
                 <div className="flex flex-1 items-center gap-2">
                   <div className="relative max-w-sm w-full">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-4 w-4 text-gray-400" /></div>
-                    <input type="text" className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="工具NOや名称で検索..." />
+                    <input type="text" value={toolListSearch} onChange={(e) => setToolListSearch(e.target.value)} className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="工具NOや名称で検索..." />
                   </div>
-                  <select className="block w-40 pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                  <select value={toolListStatus} onChange={(e) => setToolListStatus(e.target.value)} className="block w-40 pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
                     <option>すべての状態</option><option>保管中</option><option>持出中</option>
                   </select>
+                  <button onClick={fetchTools} disabled={isLoading} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md border border-gray-400 text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    <RefreshCw className={clsx('w-4 h-4', isLoading && 'animate-spin')} />更新
+                  </button>
                 </div>
               </div>
 
@@ -557,7 +565,17 @@ export default function Page() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {tools.map((row, index) => (
+                      {tools
+                        .filter((row) => {
+                          const q = toolListSearch.toLowerCase()
+                          const matchText = !q ||
+                            row.工具no.toLowerCase().includes(q) ||
+                            (row.名称 ?? '').toLowerCase().includes(q) ||
+                            (row.略称 ?? '').toLowerCase().includes(q)
+                          const matchStatus = toolListStatus === 'すべての状態' || row.状態 === toolListStatus
+                          return matchText && matchStatus
+                        })
+                        .map((row, index) => (
                         <tr key={index} className="hover:bg-blue-50 transition-colors">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 font-mono">{row.工具no}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
