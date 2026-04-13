@@ -57,6 +57,33 @@ export default function Page() {
   const [activeMenu, setActiveMenu] = useState('工具管理一覧')
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isMasterMenuOpen, setIsMasterMenuOpen] = useState(true)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [loginId, setLoginId] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginError, setLoginError] = useState<string | null>(null)
+
+  const [isLoginLoading, setIsLoginLoading] = useState(false)
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (loginPassword !== 'kmcfkmcf') {
+      setLoginError('IDまたはパスワードが正しくありません。')
+      return
+    }
+    setIsLoginLoading(true)
+    setLoginError(null)
+    const { data, error } = await supabase
+      .from('社員マスタ')
+      .select('*')
+      .eq('社員no', loginId.trim())
+      .single()
+    setIsLoginLoading(false)
+    if (error || !data) {
+      setLoginError('IDまたはパスワードが正しくありません。')
+      return
+    }
+    setIsLoggedIn(true)
+  }
   
   const [tools, setTools] = useState<Tool[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -277,7 +304,7 @@ export default function Page() {
     }
     setIsSaving(false)
     if (error) {
-      setStaffSaveError(error.code === '23505' ? `社員NO「${staffModalForm.社員no.trim()}」は既に登録されています。` : error.message)
+      setStaffSaveError(error.code === '23505' ? `社員no「${staffModalForm.社員no.trim()}」は既に登録されています。` : error.message)
       return
     }
     setStaffModalMode(null); await refreshStaffMasters()
@@ -385,6 +412,50 @@ export default function Page() {
     } else {
       setIsMasterMenuOpen(!isMasterMenuOpen)
     }
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-900">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+          <div className="bg-blue-600 px-8 py-6 text-center">
+            <Wrench className="mx-auto w-10 h-10 text-white mb-2" />
+            <h1 className="text-xl font-bold text-white tracking-wider">工具管理システム</h1>
+          </div>
+          <form onSubmit={handleLogin} className="px-8 py-8 space-y-5">
+            {loginError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 text-center">{loginError}</p>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ID</label>
+              <input
+                type="text"
+                value={loginId}
+                onChange={(e) => setLoginId(e.target.value)}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">パスワード</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isLoginLoading}
+              className="w-full py-2.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {isLoginLoading ? '確認中...' : 'ログイン'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -619,7 +690,7 @@ export default function Page() {
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-4 w-4 text-gray-400" /></div>
                   <input type="text" value={staffSearch} onChange={(e) => setStaffSearch(e.target.value)}
                     className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                    placeholder="社員NOや名称で検索..." />
+                    placeholder="社員noや名称で検索..." />
                 </div>
               </div>
               <div className="flex-1 overflow-auto">
@@ -631,7 +702,7 @@ export default function Page() {
                   <table className="divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: `${staffColWidths.reduce((a, b) => a + b, 0)}px` }}>
                     <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
-                        {(['社員NO', '社員名', '部署', '登録日時', '更新日時'] as const).map((label, i) => (
+                        {(['社員no', '社員名', '部署', '登録日時', '更新日時'] as const).map((label, i) => (
                           <th key={label} style={{ width: staffColWidths[i] }} className="relative px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase overflow-hidden select-none">
                             <div className="overflow-hidden text-ellipsis whitespace-nowrap pr-2">{label}</div>
                             <div onMouseDown={(e) => handleStaffResizeMouseDown(e, i)} className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-blue-400" />
@@ -803,7 +874,7 @@ export default function Page() {
             <div className="px-6 py-5 space-y-3">
               {staffSaveError && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{staffSaveError}</p>}
               {([
-                { key: '社員no', label: '社員NO', required: true,  maxLength: 8,  halfOnly: true },
+                { key: '社員no', label: '社員no', required: true,  maxLength: 8,  halfOnly: true },
                 { key: '社員名', label: '社員名', required: false, maxLength: 30, halfOnly: false },
                 { key: '部署',   label: '部署',   required: false, maxLength: 20, halfOnly: false },
               ] as const).map(({ key, label, required, maxLength, halfOnly }) => (
@@ -831,7 +902,7 @@ export default function Page() {
           <div className="relative bg-white rounded-lg shadow-xl w-full max-w-sm mx-4">
             <div className="px-6 py-5">
               <h2 className="text-base font-semibold text-gray-800 mb-2">削除の確認</h2>
-              <p className="text-sm text-gray-600">社員NO <span className="font-mono font-medium text-gray-900">{selectedStaffNo}</span> を削除します。この操作は元に戻せません。</p>
+              <p className="text-sm text-gray-600">社員no <span className="font-mono font-medium text-gray-900">{selectedStaffNo}</span> を削除します。この操作は元に戻せません。</p>
             </div>
             <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-200">
               <button onClick={() => setIsStaffDeleteConfirmOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors">キャンセル</button>
