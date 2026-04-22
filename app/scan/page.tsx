@@ -58,37 +58,48 @@ export default function ScanPage() {
       return
     }
 
-    // view_工具一覧から検索（状態を含めて取得するため）
-    const { data, error } = await supabase
-      .from('view_工具一覧')
+    // 工具マスタから工具名を取得
+    const { data: toolData, error: toolError } = await supabase
+      .from('工具マスタ')
       .select('*')
       .eq('工具no', toolInput)
       .single()
 
-    if (error || !data) {
+    if (toolError || !toolData) {
       setMessage({ type: 'error', text: '工具が見つかりません。' })
       return
     }
 
-    // ★ ここが超重要！持出・返却のロジックチェック ★
-    if (mode === '持出' && data.状態 === '持出中') {
-      setMessage({ type: 'error', text: `【エラー】${data.名称} は既に「持出中」です！` })
+    // 持出返却実績から現在の状態を直接判定
+    // 持出中: レコードがあり、持出日時が入っていて、返却日時が空
+    // 保管中: レコードが存在しない、または返却日時が入っている
+    const { data: jissekiData } = await supabase
+      .from('持出返却実績')
+      .select('*')
+      .eq('工具no', toolInput)
+      .single()
+
+    const isCheckedOut = !!(jissekiData && jissekiData.持出日時 && !jissekiData.返却日時)
+    const 状態 = isCheckedOut ? '持出中' : '保管中'
+
+    if (mode === '持出' && isCheckedOut) {
+      setMessage({ type: 'error', text: `【エラー】${toolData.名称} は既に「持出中」です！` })
       return
     }
-    if (mode === '返却' && data.状態 === '保管中') {
-      setMessage({ type: 'error', text: `【エラー】${data.名称} は持ち出されていません（保管中）。` })
+    if (mode === '返却' && !isCheckedOut) {
+      setMessage({ type: 'error', text: `【エラー】${toolData.名称} は持ち出されていません（保管中）。` })
       return
     }
 
     // チェックOKならリストに追加
     const newTool: ScannedTool = {
-      工具no: data.工具no,
-      名称: data.名称,
-      状態: data.状態
+      工具no: toolData.工具no,
+      名称: toolData.名称,
+      状態,
     }
     setScannedTools([newTool, ...scannedTools])
     setMessage(null)
-    setToolInput('') // 次の入力のために空にする
+    setToolInput('')
   }
 
   const handleRemoveTool = (no: string) => {
@@ -110,28 +121,27 @@ export default function ScanPage() {
 
     try {
       if (mode === '持出') {
-        // 【持出の場合】新しく実績の行を作成する (INSERT)
-        const insertData = scannedTools.map(tool => ({
+        // 【持出の場合】工具noをキーにUPSERT（初回はINSERT、2回目以降は最新情報に上書き）
+        const upsertData = scannedTools.map(tool => ({
           工具no: tool.工具no,
-          倉庫no: '1', // ※今回は仮で「1」をセット
           持出者: staff.社員名,
           持出日時: now,
           返却者: '',
           返却日時: ''
         }));
 
-        const { error } = await supabase.from('持出返却実績').insert(insertData);
+        const { error } = await supabase
+          .from('持出返却実績')
+          .upsert(upsertData, { onConflict: '工具no' });
         if (error) throw error;
 
       } else if (mode === '返却') {
-        // 【返却の場合】既存の行を更新する (UPDATE)
-        // ※工具1件ずつ、まだ返却されていない行を狙って上書きします
+        // 【返却の場合】工具noをキーに返却者・返却日時を更新
         for (const tool of scannedTools) {
           const { error } = await supabase
             .from('持出返却実績')
             .update({ 返却者: staff.社員名, 返却日時: now })
-            .eq('工具no', tool.工具no)
-            .eq('返却日時', ''); // 返却日時が空っぽのレコードが対象
+            .eq('工具no', tool.工具no);
           
           if (error) throw error;
         }
