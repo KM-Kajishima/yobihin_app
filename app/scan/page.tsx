@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { ArrowRight, ArrowLeft, Camera, User, Wrench, CheckCircle, AlertCircle, X, Search, Info } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../../lib/supabase'
@@ -17,8 +17,8 @@ interface ScannedTool {
   工具no: string;
   名称: string;
   状態: string;
-  isError?: boolean;      // ★追加: エラー状態かどうか
-  errorMessage?: string;  // ★追加: エラーの理由
+  isError?: boolean;
+  errorMessage?: string;
 }
 
 export default function ScanPage() {
@@ -30,6 +30,33 @@ export default function ScanPage() {
   const [activeScanner, setActiveScanner] = useState<'staff' | 'tool' | null>(null)
   const [staffInput, setStaffInput] = useState('')
   const [toolInput, setToolInput] = useState('')
+
+  // ★ 追加: スキャン成功時の「ピッ！」という音とバイブレーション
+  const playScanBeep = () => {
+    // 1. スマホのバイブレーション（Android等で動作）
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(100); // 0.1秒間ブルッと震わせる
+    }
+
+    // 2. 電子音「ピッ」を鳴らす（Web Audio API）
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContext) {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1500, ctx.currentTime); // 1500Hzの高めの音
+        gain.gain.setValueAtTime(0.1, ctx.currentTime); // 音量
+        osc.start();
+        osc.stop(ctx.currentTime + 0.1); // 0.1秒間だけ鳴らす
+      }
+    } catch (e) {
+      console.error("Audio error:", e);
+    }
+  };
 
   const getFormattedDate = () => {
     const d = new Date();
@@ -57,12 +84,9 @@ export default function ScanPage() {
     setStaffInput('')
   }
 
-  // --- 2. 工具取得処理 (RFID一括スキャンを見据えたロジックに変更) ---
   const handleToolScan = async (idToSearch: string) => {
     if (!idToSearch) return;
 
-    // 既にリストにある場合は、処理を中断する（連続スキャン時の重複防止）
-    // ※将来のRFID対応時は、ここを「無視してreturn」のみにするのがベストです
     if (scannedTools.find(t => t.工具no === idToSearch)) {
       setToolInput('');
       return; 
@@ -73,7 +97,6 @@ export default function ScanPage() {
     let toolName = "不明な工具";
     let toolState = "不明";
 
-    // 工具マスタから検索
     const { data: toolData, error: toolError } = await supabase
       .from('工具マスタ')
       .select('*')
@@ -81,13 +104,11 @@ export default function ScanPage() {
       .single()
 
     if (toolError || !toolData) {
-      // マスタにない場合はエラー項目としてリストに追加する
       isError = true;
       errorMessage = "マスタに登録されていません";
     } else {
       toolName = toolData.名称;
       
-      // 持出返却実績から状態を取得
       const { data: jissekiData } = await supabase
         .from('持出返却実績')
         .select('*')
@@ -97,7 +118,6 @@ export default function ScanPage() {
       const isCheckedOut = !!(jissekiData && jissekiData.持出日時 && !jissekiData.返却日時)
       toolState = isCheckedOut ? '持出中' : '保管中'
 
-      // モードと状態の矛盾チェック（エラーでもリストに追加する）
       if (mode === '持出' && isCheckedOut) {
         isError = true;
         errorMessage = "既に持出中（他の人が利用中）です";
@@ -107,16 +127,14 @@ export default function ScanPage() {
       }
     }
 
-    // 正常・エラー問わずリストに追加
     const newTool: ScannedTool = {
-      工具no: idToSearch, // マスタにない場合も考慮して検索IDを使う
+      工具no: idToSearch,
       名称: toolName,
       状態: toolState,
       isError,
       errorMessage
     }
 
-    // 常にリストの先頭に追加していく
     setScannedTools(prev => [newTool, ...prev])
     setMessage(null)
     setToolInput('')
@@ -126,11 +144,9 @@ export default function ScanPage() {
     setScannedTools(scannedTools.filter(t => t.工具no !== no))
   }
 
-  // --- 3. 登録処理 ---
   const handleSubmit = async () => {
     if (!mode || !staff || scannedTools.length === 0) return;
 
-    // ★ エラーがない「正常な工具」だけを抽出して処理する
     const validTools = scannedTools.filter(tool => !tool.isError);
 
     if (validTools.length === 0) {
@@ -166,7 +182,6 @@ export default function ScanPage() {
         }
       }
 
-      // エラー項目が混ざっていた場合は、登録されなかったことをアラートで補足
       const errorCount = scannedTools.length - validTools.length;
       let alertMsg = `${validTools.length}件の${mode}処理が完了しました！`;
       if (errorCount > 0) {
@@ -194,7 +209,6 @@ export default function ScanPage() {
     setMessage(null)
   }
 
-  // 正常なツールの数を計算
   const validCount = scannedTools.filter(t => !t.isError).length;
 
   return (
@@ -214,11 +228,18 @@ export default function ScanPage() {
                 if (result && result.length > 0) {
                   const scannedCode = result[0].rawValue;
                   
+                  // ★ 追加: すでにリストにあるか確認（連続でピピピピ鳴るのを防ぐため）
+                  if (activeScanner === 'tool' && scannedTools.find(t => t.工具no === scannedCode)) {
+                    return; // すでにある場合は音も鳴らさず無視
+                  }
+
+                  // 新しいQRコードなら、音とバイブレーションを発生させる！
+                  playScanBeep();
+                  
                   if (activeScanner === 'staff') {
-                    setActiveScanner(null); // 担当者はスキャンしたらカメラを閉じる
+                    setActiveScanner(null);
                     handleStaffScan(scannedCode);
                   } else {
-                    // ★RFID一括スキャンを見据え、工具は連続で読み取れるようにカメラを閉じない
                     handleToolScan(scannedCode);
                   }
                 }
@@ -226,13 +247,13 @@ export default function ScanPage() {
               onError={(error) => console.log(error)}
             />
             <div className="absolute inset-0 border-[40px] border-black/50 pointer-events-none">
-              <div className="w-full h-full border-2 border-white/50 rounded-lg"></div>
+              <div className="w-full h-full border-2 border-white/50 rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"></div>
             </div>
           </div>
           <div className="p-6 bg-slate-900 text-center text-slate-300 text-sm flex flex-col gap-4">
             <p>枠内にQRコードを合わせてください</p>
             {activeScanner === 'tool' && (
-              <button onClick={() => setActiveScanner(null)} className="py-3 px-6 bg-blue-600 text-white rounded-full font-bold">
+              <button onClick={() => setActiveScanner(null)} className="py-3 px-6 bg-blue-600 text-white rounded-full font-bold shadow-lg active:scale-95 transition-all">
                 スキャンを終了してリストを見る
               </button>
             )}
@@ -257,7 +278,6 @@ export default function ScanPage() {
       )}
 
       <main className="flex-1 overflow-y-auto p-4 flex flex-col gap-6">
-        
         {!mode && (
           <div className="flex flex-col gap-4 mt-8">
             <button onClick={() => setMode('持出')} className="flex items-center justify-between p-6 bg-white border-2 border-blue-100 rounded-2xl shadow-sm hover:border-blue-500 transition-all group">
@@ -323,7 +343,6 @@ export default function ScanPage() {
               ) : (
                 <ul className="space-y-3">
                   {scannedTools.map((tool) => (
-                    // ★ エラーの有無で背景色・枠線色を変えるUI
                     <li key={tool.工具no} className={clsx(
                       "p-4 rounded-xl shadow-sm border flex items-center justify-between animate-in slide-in-from-bottom-2",
                       tool.isError ? "bg-red-50 border-red-300" : "bg-white border-slate-200"
@@ -334,7 +353,6 @@ export default function ScanPage() {
                           NO: {tool.工具no} 
                           {!tool.isError && <span className="ml-2 px-1.5 py-0.5 bg-gray-100 rounded text-gray-600">{tool.状態}</span>}
                         </p>
-                        {/* エラーメッセージの表示 */}
                         {tool.isError && (
                           <p className="mt-1.5 text-xs font-bold text-red-600 flex items-center gap-1">
                             <AlertCircle className="w-3.5 h-3.5" />
@@ -352,7 +370,6 @@ export default function ScanPage() {
         )}
       </main>
 
-      {/* 登録ボタン：エラー項目を抜いた「正常な件数」だけを表示・処理する */}
       {mode && staff && scannedTools.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10 flex justify-center">
           <div className="w-full max-w-md">
@@ -361,7 +378,7 @@ export default function ScanPage() {
               disabled={validCount === 0}
               className={clsx(
                 "w-full py-4 text-white font-bold text-lg rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2", 
-                validCount === 0 ? "bg-slate-300 cursor-not-allowed" : // 登録できるものがない場合はグレーアウト
+                validCount === 0 ? "bg-slate-300 cursor-not-allowed" :
                 mode === '持出' ? "bg-blue-600 hover:bg-blue-700 active:scale-95" : "bg-emerald-600 hover:bg-emerald-700 active:scale-95"
               )}
             >
