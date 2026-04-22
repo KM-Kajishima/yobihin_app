@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { ArrowRight, ArrowLeft, Camera, User, Wrench, CheckCircle, AlertCircle, X, Search, Info } from 'lucide-react'
 import clsx from 'clsx'
 import { supabase } from '../../lib/supabase'
@@ -31,14 +31,10 @@ export default function ScanPage() {
   const [staffInput, setStaffInput] = useState('')
   const [toolInput, setToolInput] = useState('')
 
-  // ★ 追加: スキャン成功時の「ピッ！」という音とバイブレーション
   const playScanBeep = () => {
-    // 1. スマホのバイブレーション（Android等で動作）
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate(100); // 0.1秒間ブルッと震わせる
+      navigator.vibrate(100);
     }
-
-    // 2. 電子音「ピッ」を鳴らす（Web Audio API）
     try {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioContext) {
@@ -48,10 +44,10 @@ export default function ScanPage() {
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(1500, ctx.currentTime); // 1500Hzの高めの音
-        gain.gain.setValueAtTime(0.1, ctx.currentTime); // 音量
+        osc.frequency.setValueAtTime(1500, ctx.currentTime);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
         osc.start();
-        osc.stop(ctx.currentTime + 0.1); // 0.1秒間だけ鳴らす
+        osc.stop(ctx.currentTime + 0.1);
       }
     } catch (e) {
       console.error("Audio error:", e);
@@ -216,24 +212,24 @@ export default function ScanPage() {
       
       {activeScanner && (
         <div className="fixed inset-0 z-50 bg-black flex flex-col">
-          <div className="flex justify-between items-center p-4 bg-slate-900 text-white pb-6">
+          <div className="flex justify-between items-center p-4 bg-slate-900 text-white pb-6 relative z-20">
             <h2 className="font-bold">{activeScanner === 'staff' ? '担当者のQR' : '工具のQR'}をスキャン</h2>
             <button onClick={() => setActiveScanner(null)} className="p-2 bg-slate-800 rounded-full hover:bg-slate-700">
               <X className="w-6 h-6" />
             </button>
           </div>
-          <div className="flex-1 relative bg-black">
+          
+          {/* ★ 修正: overflow-hidden を追加して影のはみ出しを防ぐ */}
+          <div className="flex-1 relative bg-black overflow-hidden flex flex-col">
             <Scanner
               onScan={(result) => {
                 if (result && result.length > 0) {
                   const scannedCode = result[0].rawValue;
                   
-                  // ★ 追加: すでにリストにあるか確認（連続でピピピピ鳴るのを防ぐため）
                   if (activeScanner === 'tool' && scannedTools.find(t => t.工具no === scannedCode)) {
-                    return; // すでにある場合は音も鳴らさず無視
+                    return; 
                   }
 
-                  // 新しいQRコードなら、音とバイブレーションを発生させる！
                   playScanBeep();
                   
                   if (activeScanner === 'staff') {
@@ -246,14 +242,27 @@ export default function ScanPage() {
               }}
               onError={(error) => console.log(error)}
             />
-            <div className="absolute inset-0 border-[40px] border-black/50 pointer-events-none">
+            
+            <div className="absolute inset-0 border-[40px] border-black/50 pointer-events-none z-10">
               <div className="w-full h-full border-2 border-white/50 rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"></div>
             </div>
+
+            {/* ★ 追加: カメラ画面上に浮かび上がるスキャン数のカウント */}
+            {activeScanner === 'tool' && scannedTools.length > 0 && (
+              <div className="absolute top-8 left-1/2 -translate-x-1/2 z-20 bg-blue-600/90 backdrop-blur-sm text-white px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2 border border-blue-400 animate-in fade-in slide-in-from-top-4">
+                <CheckCircle className="w-6 h-6" />
+                <span className="text-xl">{scannedTools.length}</span> 件スキャン済
+              </div>
+            )}
           </div>
-          <div className="p-6 bg-slate-900 text-center text-slate-300 text-sm flex flex-col gap-4">
-            <p>枠内にQRコードを合わせてください</p>
+
+          <div className="p-6 bg-slate-900 text-center text-slate-100 text-sm flex flex-col gap-4 relative z-20 border-t border-slate-800">
+            <p className="opacity-80">枠内にQRコードを合わせてください</p>
             {activeScanner === 'tool' && (
-              <button onClick={() => setActiveScanner(null)} className="py-3 px-6 bg-blue-600 text-white rounded-full font-bold shadow-lg active:scale-95 transition-all">
+              <button 
+                onClick={() => setActiveScanner(null)} 
+                className="py-4 px-6 bg-blue-500 hover:bg-blue-400 text-white rounded-xl font-bold shadow-[0_0_15px_rgba(59,130,246,0.4)] active:scale-95 transition-all text-base flex justify-center items-center gap-2"
+              >
                 スキャンを終了してリストを見る
               </button>
             )}
