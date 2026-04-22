@@ -219,7 +219,6 @@ export default function ScanPage() {
             </button>
           </div>
           
-          {/* ★ 修正: overflow-hidden を追加して影のはみ出しを防ぐ */}
           <div className="flex-1 relative bg-black overflow-hidden flex flex-col">
             <Scanner
               onScan={(result) => {
@@ -247,10 +246,10 @@ export default function ScanPage() {
               <div className="w-full h-full border-2 border-white/50 rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.5)]"></div>
             </div>
 
-            {/* ★ 追加: カメラ画面上に浮かび上がるスキャン数のカウント */}
+            {/* ★ 修正: top-4に変更し、whitespace-nowrapを追加して改行を防ぐ */}
             {activeScanner === 'tool' && scannedTools.length > 0 && (
-              <div className="absolute top-8 left-1/2 -translate-x-1/2 z-20 bg-blue-600/90 backdrop-blur-sm text-white px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2 border border-blue-400 animate-in fade-in slide-in-from-top-4">
-                <CheckCircle className="w-6 h-6" />
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-blue-600/90 backdrop-blur-sm text-white px-6 py-3 rounded-full font-bold shadow-2xl flex items-center justify-center gap-2 border border-blue-400 animate-in fade-in slide-in-from-top-2 whitespace-nowrap min-w-max">
+                <CheckCircle className="w-6 h-6 shrink-0" />
                 <span className="text-xl">{scannedTools.length}</span> 件スキャン済
               </div>
             )}
