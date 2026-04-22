@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { staffSchema, warehouseSchema } from '../lib/volidotion'
-import { Wrench, Users, Home, Settings, Search, Menu, ChevronRight, ChevronDown, Database, Plus, Pencil, Copy, Trash2, Upload, Download, X, RefreshCw } from 'lucide-react'
+import { Wrench, Users, Home, Settings, Search, Menu, ChevronRight, ChevronDown, Database, Plus, Pencil, Copy, Trash2, Upload, Download, X, RefreshCw, QrCode } from 'lucide-react'
 import clsx from 'clsx'
 
 // データの形を定義
@@ -619,6 +619,9 @@ export default function Page() {
                   </button>
                   <button className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-gray-400 text-gray-700 hover:bg-gray-100 transition-colors">
                     <Download className="w-4 h-4" />出力
+                  </button>
+                  <button onClick={() => window.open('/qr', '_blank')} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-purple-400 text-purple-600 hover:bg-purple-50 transition-colors">
+                    <QrCode className="w-4 h-4" />QR一覧
                   </button>
                 </div>
                 <div className="relative max-w-sm w-full">

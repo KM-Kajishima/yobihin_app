@@ -1,9 +1,10 @@
 "use client"
 
 import React, { useState } from 'react'
-import { ArrowRight, ArrowLeft, User, Wrench, CheckCircle, AlertCircle, X, Search } from 'lucide-react'
+import { ArrowRight, ArrowLeft, Camera, User, Wrench, CheckCircle, AlertCircle, X, Search } from 'lucide-react'
 import clsx from 'clsx'
-import { supabase } from '../../lib/supabase' // ← Supabaseを呼び出すためのインポートを追加！
+import { supabase } from '../../lib/supabase'
+import { Scanner } from '@yudiel/react-qr-scanner'
 
 type Mode = '持出' | '返却' | null;
 
@@ -24,20 +25,28 @@ export default function ScanPage() {
   const [scannedTools, setScannedTools] = useState<ScannedTool[]>([])
   const [message, setMessage] = useState<{ type: 'error' | 'success', text: string } | null>(null)
 
-  // カメラ実装前のテスト用：QRコードの代わりになる入力欄
-  const [staffInput, setStaffInput] = useState('00000001') // テストしやすいよう初期値セット
-  const [toolInput, setToolInput] = useState('101000000001')
+  // カメラの起動状態を管理するState
+  const [activeScanner, setActiveScanner] = useState<'staff' | 'tool' | null>(null)
 
-  // --- 1. 担当者をSupabaseから取得 ---
-  const handleStaffScan = async () => {
-    if (!staffInput) return;
+  // バックアップ用の手入力State
+  const [staffInput, setStaffInput] = useState('')
+  const [toolInput, setToolInput] = useState('')
 
-    // 社員マスタから検索
+  const getFormattedDate = () => {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+
+  // --- 1. 担当者をSupabaseから取得 (Copilotのロジック + 引数受け取り) ---
+  const handleStaffScan = async (idToSearch: string) => {
+    if (!idToSearch) return;
+
     const { data, error } = await supabase
       .from('社員マスタ')
       .select('*')
-      .eq('社員no', staffInput)
-      .single() // 1件だけ取得
+      .eq('社員no', idToSearch)
+      .single()
 
     if (error || !data) {
       setMessage({ type: 'error', text: '担当者が見つかりません。QRコードを確認してください。' })
@@ -47,13 +56,14 @@ export default function ScanPage() {
     setStaff({ 社員no: data.社員no, 社員名: data.社員名 })
     setMessage({ type: 'success', text: `${data.社員名}さんを読み込みました` })
     setTimeout(() => setMessage(null), 2000)
+    setStaffInput('') // 入力欄をクリア
   }
 
-  // --- 2. 工具をSupabaseから取得し、状態をチェック ---
-  const handleToolScan = async () => {
-    if (!toolInput) return;
+  // --- 2. 工具を取得し、状態をチェック (Copilotのロジック + 引数受け取り) ---
+  const handleToolScan = async (idToSearch: string) => {
+    if (!idToSearch) return;
 
-    if (scannedTools.find(t => t.工具no === toolInput)) {
+    if (scannedTools.find(t => t.工具no === idToSearch)) {
       setMessage({ type: 'error', text: '既にリストに追加されています' })
       return
     }
@@ -62,7 +72,7 @@ export default function ScanPage() {
     const { data: toolData, error: toolError } = await supabase
       .from('工具マスタ')
       .select('*')
-      .eq('工具no', toolInput)
+      .eq('工具no', idToSearch)
       .single()
 
     if (toolError || !toolData) {
@@ -71,12 +81,10 @@ export default function ScanPage() {
     }
 
     // 持出返却実績から現在の状態を直接判定
-    // 持出中: レコードがあり、持出日時が入っていて、返却日時が空
-    // 保管中: レコードが存在しない、または返却日時が入っている
     const { data: jissekiData } = await supabase
       .from('持出返却実績')
       .select('*')
-      .eq('工具no', toolInput)
+      .eq('工具no', idToSearch)
       .single()
 
     const isCheckedOut = !!(jissekiData && jissekiData.持出日時 && !jissekiData.返却日時)
@@ -99,21 +107,14 @@ export default function ScanPage() {
     }
     setScannedTools([newTool, ...scannedTools])
     setMessage(null)
-    setToolInput('')
+    setToolInput('') // 入力欄をクリア
   }
 
   const handleRemoveTool = (no: string) => {
     setScannedTools(scannedTools.filter(t => t.工具no !== no))
   }
 
- // --- データベース用の現在日時を作成するツール (YYYY/MM/DD HH:mm:ss) ---
-  const getFormattedDate = () => {
-    const d = new Date();
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  };
-
-  // --- 3. 登録ボタンを押した時の処理 ---
+  // --- 3. 登録処理 (CopilotのUpsertロジック) ---
   const handleSubmit = async () => {
     if (!mode || !staff || scannedTools.length === 0) return;
 
@@ -121,7 +122,6 @@ export default function ScanPage() {
 
     try {
       if (mode === '持出') {
-        // 【持出の場合】工具noをキーにUPSERT（初回はINSERT、2回目以降は最新情報に上書き）
         const upsertData = scannedTools.map(tool => ({
           工具no: tool.工具no,
           持出者: staff.社員名,
@@ -136,7 +136,6 @@ export default function ScanPage() {
         if (error) throw error;
 
       } else if (mode === '返却') {
-        // 【返却の場合】工具noをキーに返却者・返却日時を更新
         for (const tool of scannedTools) {
           const { error } = await supabase
             .from('持出返却実績')
@@ -147,7 +146,6 @@ export default function ScanPage() {
         }
       }
 
-      // 成功したら画面をリセットして完了メッセージ
       alert(`${scannedTools.length}件の${mode}処理が完了しました！`);
       setMode(null);
       setStaff(null);
@@ -169,26 +167,49 @@ export default function ScanPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-gray-50 flex flex-col font-sans">
-      <header className={clsx(
-        "h-14 flex items-center px-4 text-white shrink-0 shadow-sm transition-colors",
-        mode === '持出' ? "bg-blue-600" : mode === '返却' ? "bg-emerald-600" : "bg-slate-800"
-      )}>
-        {mode && (
-          <button onClick={handleReset} className="p-2 -ml-2 mr-2 rounded-full hover:bg-white/20">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-        )}
-        <h1 className="text-lg font-bold flex-1 text-center pr-8">
-          {mode ? `工具${mode}スキャン` : '工具管理アプリ'}
-        </h1>
+    <div className="max-w-md mx-auto min-h-screen bg-gray-50 flex flex-col font-sans relative">
+      
+      {/* ＝＝＝ カメラスキャン用オーバーレイ ＝＝＝ */}
+      {activeScanner && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+          <div className="flex justify-between items-center p-4 bg-slate-900 text-white pb-6">
+            <h2 className="font-bold">{activeScanner === 'staff' ? '担当者のQR' : '工具のQR'}をスキャン</h2>
+            <button onClick={() => setActiveScanner(null)} className="p-2 bg-slate-800 rounded-full hover:bg-slate-700">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <div className="flex-1 relative bg-black">
+            <Scanner
+              onScan={(result) => {
+                if (result && result.length > 0) {
+                  const scannedCode = result[0].rawValue;
+                  setActiveScanner(null);
+                  if (activeScanner === 'staff') {
+                    handleStaffScan(scannedCode);
+                  } else {
+                    handleToolScan(scannedCode);
+                  }
+                }
+              }}
+              onError={(error) => console.log(error)}
+            />
+            <div className="absolute inset-0 border-[40px] border-black/50 pointer-events-none">
+              <div className="w-full h-full border-2 border-white/50 rounded-lg"></div>
+            </div>
+          </div>
+          <div className="p-8 bg-slate-900 text-center text-slate-300 text-sm">
+            枠内にQRコードを合わせてください
+          </div>
+        </div>
+      )}
+
+      <header className={clsx("h-14 flex items-center px-4 text-white shrink-0 shadow-sm transition-colors", mode === '持出' ? "bg-blue-600" : mode === '返却' ? "bg-emerald-600" : "bg-slate-800")}>
+        {mode && <button onClick={handleReset} className="p-2 -ml-2 mr-2 rounded-full hover:bg-white/20"><ArrowLeft className="w-5 h-5" /></button>}
+        <h1 className="text-lg font-bold flex-1 text-center pr-8">{mode ? `工具${mode}スキャン` : '工具管理アプリ'}</h1>
       </header>
 
       {message && (
-        <div className={clsx(
-          "px-4 py-3 text-sm flex items-start gap-2 animate-in fade-in slide-in-from-top-2",
-          message.type === 'error' ? "bg-red-50 text-red-700 border-b border-red-200" : "bg-green-50 text-green-700 border-b border-green-200"
-        )}>
+        <div className={clsx("px-4 py-3 text-sm flex items-start gap-2 animate-in fade-in slide-in-from-top-2", message.type === 'error' ? "bg-red-50 text-red-700 border-b border-red-200" : "bg-green-50 text-green-700 border-b border-green-200")}>
           {message.type === 'error' ? <AlertCircle className="w-5 h-5 shrink-0" /> : <CheckCircle className="w-5 h-5 shrink-0" />}
           <p className="font-medium pt-0.5">{message.text}</p>
         </div>
@@ -216,22 +237,24 @@ export default function ScanPage() {
         {mode && !staff && (
           <div className="flex flex-col items-center justify-center h-full gap-4 mt-12">
             <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 mb-4"><User className="w-12 h-12" /></div>
-            <h2 className="text-lg font-semibold text-slate-700">担当者のQRをスキャン</h2>
             
-            {/* テスト用のID手入力エリア */}
-            <div className="mt-4 flex gap-2 w-full max-w-xs">
-              <input 
-                type="text" 
-                value={staffInput}
-                onChange={(e) => setStaffInput(e.target.value)}
-                placeholder="社員NOを入力"
-                className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-              <button onClick={handleStaffScan} className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2">
-                <Search className="w-4 h-4" /> 検索
-              </button>
+            {/* カメラ起動ボタン */}
+            <button 
+              onClick={() => setActiveScanner('staff')}
+              className="px-8 py-4 bg-slate-800 text-white font-bold rounded-full shadow-lg flex items-center gap-3 hover:bg-slate-700 active:scale-95 transition-all text-lg mb-8"
+            >
+              <Camera className="w-6 h-6" />
+              担当者のQRをスキャン
+            </button>
+
+            <div className="w-full border-t border-slate-200 relative mt-4">
+              <span className="absolute left-1/2 -translate-x-1/2 -top-3 bg-gray-50 px-2 text-xs text-slate-400">または手入力</span>
             </div>
-            <p className="text-xs text-slate-500 mt-2">※現在はカメラの代わりにIDを手入力してテストします</p>
+
+            <div className="mt-4 flex gap-2 w-full max-w-xs">
+              <input type="text" value={staffInput} onChange={(e) => setStaffInput(e.target.value)} placeholder="社員NOを入力" className="flex-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+              <button onClick={() => handleStaffScan(staffInput)} className="px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2"><Search className="w-4 h-4" /> 検索</button>
+            </div>
           </div>
         )}
 
@@ -245,21 +268,18 @@ export default function ScanPage() {
               </div>
             </div>
 
-            {/* テスト用の工具ID手入力エリア */}
+            {/* 工具カメラ起動ボタン */}
+            <button 
+              onClick={() => setActiveScanner('tool')}
+              className={clsx("mb-6 py-4 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all text-lg", mode === '持出' ? "bg-blue-600 hover:bg-blue-700" : "bg-emerald-600 hover:bg-emerald-700")}
+            >
+              <Camera className="w-6 h-6" />
+              工具のQRをスキャンして追加
+            </button>
+
             <div className="flex gap-2 mb-6 shrink-0 bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-              <input 
-                type="text" 
-                value={toolInput}
-                onChange={(e) => setToolInput(e.target.value)}
-                placeholder="工具NOを入力"
-                className="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-              />
-              <button 
-                onClick={handleToolScan}
-                className={clsx("px-4 py-2 text-white rounded-lg font-semibold flex items-center gap-2 text-sm", mode === '持出' ? "bg-blue-600" : "bg-emerald-600")}
-              >
-                <Search className="w-4 h-4" /> 追加
-              </button>
+              <input type="text" value={toolInput} onChange={(e) => setToolInput(e.target.value)} placeholder="手動で工具NOを入力" className="flex-1 px-3 py-2 border rounded-lg text-sm bg-slate-50 focus:bg-white" />
+              <button onClick={() => handleToolScan(toolInput)} className="px-4 py-2 bg-slate-600 text-white rounded-lg font-semibold flex items-center gap-2 text-sm"><Search className="w-4 h-4" /> 追加</button>
             </div>
 
             <div className="flex-1">
